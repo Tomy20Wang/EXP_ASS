@@ -58,43 +58,31 @@ function App() {
     return featureCatalog.filter((feature) => matchesFeatureSearch(feature, normalized)).slice(0, 6);
   }, [deferredSearch]);
 
-  const visibleFeatures = useMemo(() => {
-    const normalized = deferredSearch.trim().toLowerCase();
-
-    return featureCatalog.filter((feature) => {
-      return !normalized || matchesFeatureSearch(feature, normalized);
-    });
-  }, [deferredSearch]);
-
-  const treeSections = useMemo(() => buildTree(visibleFeatures), [visibleFeatures]);
+  const treeSections = useMemo(() => buildTree(featureCatalog), []);
 
   const activeFeature =
     featureCatalog.find((feature) => feature.id === activeFeatureId) ?? featureCatalog[0];
 
-  function handleFeatureSelect(feature: FeatureDefinition, clearSearch = true) {
+  function handleFeatureSelect(feature: FeatureDefinition) {
     startTransition(() => {
       setActiveFeatureId(feature.id);
       setExpandedCategory(feature.category);
-      if (clearSearch) {
-        setSearchQuery("");
-      }
     });
   }
 
   function handleCategorySelect(category: FeatureCategory) {
     startTransition(() => {
       setExpandedCategory(category);
-      const firstVisibleInCategory = visibleFeatures.find((feature) => feature.category === category);
       const firstFeatureInCategory = featureCatalog.find((feature) => feature.category === category);
-      const nextFeature = firstVisibleInCategory ?? firstFeatureInCategory;
 
-      if (nextFeature) {
-        setActiveFeatureId(nextFeature.id);
+      if (firstFeatureInCategory) {
+        setActiveFeatureId(firstFeatureInCategory.id);
       }
     });
   }
 
   const activeCategory = activeFeature ? categoryMeta[activeFeature.category] : null;
+  const activeKeywords = activeFeature ? activeFeature.keywords.slice(0, 4) : [];
 
   return (
     <main className="app-shell">
@@ -107,26 +95,50 @@ function App() {
         onCategorySelect={handleCategorySelect}
         activeFeatureId={activeFeature?.id ?? ""}
         onFeatureSelect={handleFeatureSelect}
-        searchHasMatches={searchSuggestions.length > 0}
       />
 
       <section className="workspace">
-        <div className="workspace-head">
+        <header className="workspace-topbar">
           <div>
-            <p className="workspace-kicker">
-              {activeCategory?.label} / {activeFeature?.group}
-            </p>
-            <h2>{activeFeature?.title}</h2>
-            <p className="workspace-copy">{activeFeature?.description}</p>
+            <p className="workspace-topbar-label">Open EXP_ASS</p>
+            <h1>{activeFeature?.title}</h1>
           </div>
 
-          <div className="workspace-doc-note">
-            <p className="meta-label">Implementation Note</p>
-            <p className="meta-copy">{activeFeature?.docsSummary}</p>
+          <div className="workspace-topbar-badge">
+            {activeCategory?.label} / {activeFeature?.group}
+          </div>
+        </header>
+
+        <div className="workspace-scroll">
+          <div className="workspace-stage">
+            <div className="workspace-head">
+              <div>
+                <p className="workspace-kicker">
+                  {activeCategory?.label} / {activeFeature?.group}
+                </p>
+                <h2>{activeFeature?.title}</h2>
+                <p className="workspace-copy">{activeFeature?.description}</p>
+
+                <div className="keyword-row">
+                  {activeKeywords.map((keyword) => (
+                    <span key={keyword} className="keyword-pill">
+                      {keyword}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="workspace-doc-note">
+                <p className="meta-label">Implementation Note</p>
+                <p className="meta-copy">{activeFeature?.docsSummary}</p>
+              </div>
+            </div>
+
+            <div className="workspace-panel">
+              <div className="tool-stage">{activeFeature?.render()}</div>
+            </div>
           </div>
         </div>
-
-        <div className="workspace-panel">{activeFeature?.render()}</div>
       </section>
     </main>
   );
