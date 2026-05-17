@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "exp-ass"
+version = "0.1.0"
+description = "Research utility toolkit for image and video processing workflows."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "Pillow>=10.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "python"}
+
+[tool.setuptools.packages.find]
+where = ["python"]
