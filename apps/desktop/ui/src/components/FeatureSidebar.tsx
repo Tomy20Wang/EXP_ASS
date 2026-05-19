@@ -1,5 +1,9 @@
-import type { FeatureDefinition, FeatureCategory } from "../features/catalog";
-import { categoryMeta } from "../features/catalog";
+import type { AppText } from "../i18n";
+import type {
+  CategoryMetaMap,
+  FeatureDefinition,
+  FeatureCategory,
+} from "../features/catalog";
 
 interface TreeGroup {
   name: string;
@@ -12,6 +16,8 @@ interface TreeSection {
 }
 
 interface FeatureSidebarProps {
+  text: AppText["sidebar"];
+  categoryMeta: CategoryMetaMap;
   searchQuery: string;
   onSearchQueryChange: (value: string) => void;
   suggestions: FeatureDefinition[];
@@ -20,9 +26,12 @@ interface FeatureSidebarProps {
   onCategorySelect: (category: FeatureCategory) => void;
   activeFeatureId: string;
   onFeatureSelect: (feature: FeatureDefinition) => void;
+  onOpenSettings: () => void;
 }
 
 export function FeatureSidebar({
+  text,
+  categoryMeta,
   searchQuery,
   onSearchQueryChange,
   suggestions,
@@ -30,31 +39,12 @@ export function FeatureSidebar({
   expandedCategory,
   onCategorySelect,
   activeFeatureId,
-  onFeatureSelect
+  onFeatureSelect,
+  onOpenSettings
 }: FeatureSidebarProps) {
   return (
     <aside className="sidebar">
-      <div className="sidebar-brand">
-        <p className="sidebar-brand-label">EXP_ASS</p>
-        <h1>Open EXP_ASS</h1>
-        <p className="brand-copy">
-          Search or browse the tool tree to open a workspace on the right.
-        </p>
-      </div>
-
-      <div className="sidebar-projects">
-        <p className="sidebar-section-label">Project</p>
-        <button className="project-item" type="button">
-          <span className="project-item-name">EXP_ASS</span>
-          <span className="project-item-badge">Toolkit</span>
-        </button>
-      </div>
-
       <div className="sidebar-card search-panel">
-        <label className="search-label sidebar-section-label" htmlFor="tool-search">
-          Quick Search
-        </label>
-
         <div className="search-input-wrap">
           <span className="search-icon" aria-hidden="true">
             /
@@ -65,18 +55,13 @@ export function FeatureSidebar({
             type="text"
             value={searchQuery}
             onChange={(event) => onSearchQueryChange(event.target.value)}
-            placeholder="Try: video resize, image, aspect ratio..."
+            placeholder={text.searchPlaceholder}
           />
         </div>
 
-        <p className="search-helper">
-          Search suggestions stay independent from the tree below.
-        </p>
-
-        <div className="search-results">
-          <p className="search-results-label">Suggestions</p>
-          {searchQuery.trim() ? (
-            suggestions.length > 0 ? (
+        {searchQuery.trim() ? (
+          <div className="search-results">
+            {suggestions.length > 0 ? (
               <div className="suggestion-list">
                 {suggestions.map((feature) => (
                   <button
@@ -86,24 +71,17 @@ export function FeatureSidebar({
                     onClick={() => onFeatureSelect(feature)}
                   >
                     <span className="suggestion-title">{feature.title}</span>
-                    <span className="suggestion-meta">
-                      {categoryMeta[feature.category].label} / {feature.group}
-                    </span>
                   </button>
                 ))}
               </div>
             ) : (
-              <p className="empty-copy">No tools matched this search yet.</p>
-            )
-          ) : (
-            <p className="empty-copy">Type a keyword to show matching tools.</p>
-          )}
-        </div>
+              <p className="empty-copy">{text.noSuggestions}</p>
+            )}
+          </div>
+        ) : null}
       </div>
 
       <div className="sidebar-card tree-panel">
-        <p className="tree-label sidebar-section-label">Tool Tree</p>
-
         {sections.map((section) => (
           <section key={section.category} className="tree-section">
             <button
@@ -112,13 +90,7 @@ export function FeatureSidebar({
               type="button"
               onClick={() => onCategorySelect(section.category)}
             >
-              <div className="tree-category-meta">
-                <span className="tree-category-pill">{categoryMeta[section.category].accent}</span>
-                <div className="tree-category-copy-block">
-                  <h2>{categoryMeta[section.category].label}</h2>
-                  <p className="tree-category-copy">{categoryMeta[section.category].description}</p>
-                </div>
-              </div>
+              <h2>{categoryMeta[section.category].label}</h2>
 
               <span className="tree-chevron" aria-hidden="true">
                 {expandedCategory === section.category ? "−" : "+"}
@@ -129,10 +101,6 @@ export function FeatureSidebar({
               <div className="tree-children">
                 {section.groups.map((group) => (
                   <div key={`${section.category}-${group.name}`} className="tree-group">
-                    {section.groups.length > 1 ? (
-                      <p className="tree-group-label">{group.name}</p>
-                    ) : null}
-
                     <div className="tree-feature-list">
                       {group.features.map((feature) => (
                         <button
@@ -143,7 +111,6 @@ export function FeatureSidebar({
                           onClick={() => onFeatureSelect(feature)}
                         >
                           <span className="tree-feature-title">{feature.title}</span>
-                          <span className="tree-feature-meta">{feature.group}</span>
                         </button>
                       ))}
                     </div>
@@ -153,6 +120,12 @@ export function FeatureSidebar({
             ) : null}
           </section>
         ))}
+      </div>
+
+      <div className="sidebar-footer">
+        <button className="sidebar-settings-button" type="button" onClick={onOpenSettings}>
+          {text.settings}
+        </button>
       </div>
     </aside>
   );

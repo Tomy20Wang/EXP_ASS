@@ -1,29 +1,62 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::io::Write;
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use serde::{Deserialize, Serialize};
+use tauri::Emitter;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ResizeTaskRequest {
+struct ToolTaskRequest {
+    request_id: Option<String>,
     task_kind: String,
     input_path: String,
     output_path: String,
-    width: u32,
-    height: u32,
-    keep_aspect: bool,
+    language: Option<String>,
+    width: Option<u32>,
+    height: Option<u32>,
+    keep_aspect: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ResizeTaskResponse {
+struct ToolTaskResponse {
     success: bool,
     message: String,
     output_path: String,
     metadata: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolTaskProgress {
+    task_kind: String,
+    current: u32,
+    total: u32,
+    percent: f64,
+    message: String,
+    current_item: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolTaskProgressEvent {
+    request_id: Option<String>,
+    task_kind: String,
+    current: u32,
+    total: u32,
+    percent: f64,
+    message: String,
+    current_item: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+enum RunnerMessage {
+    Progress(ToolTaskProgress),
+    Result(ToolTaskResponse),
 }
 
 fn resolve_project_root() -> Result<PathBuf, String> {
@@ -59,7 +92,7 @@ fn resolve_python_bin() -> String {
 }
 
 #[tauri::command]
-fn run_resize_task(request: ResizeTaskRequest) -> Result<ResizeTaskResponse, String> {
+fn run_tool_task(app: tauri::AppHandle, request: ToolTaskRequest) -> Result<ToolTaskResponse, String> {
     let project_root = resolve_project_root()?;
     let runner_path = project_root.join("python").join("desktop_runner.py");
 
@@ -75,6 +108,7 @@ fn run_resize_task(request: ResizeTaskRequest) -> Result<ResizeTaskResponse, Str
 
     let mut child = Command::new(resolve_python_bin())
         .arg(runner_path)
+        .env("EXP_ASS_STREAM_OUTPUT", "1")
         .current_dir(&project_root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -88,26 +122,71 @@ fn run_resize_task(request: ResizeTaskRequest) -> Result<ResizeTaskResponse, Str
             .map_err(|error| format!("Failed to write request to Python stdin: {error}"))?;
     }
 
-    let output = child
-        .wait_with_output()
-        .map_err(|error| format!("Failed to wait for Python runner: {error}"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Failed to capture Python stdout".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "Failed to capture Python stderr".to_string())?;
 
-    let stdout = String::from_utf8(output.stdout)
-        .map_err(|error| format!("Python stdout was not valid UTF-8: {error}"))?;
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let mut final_result: Option<ToolTaskResponse> = None;
+    let stdout_reader = BufReader::new(stdout);
 
-    if stdout.trim().is_empty() {
-        return Err(format!("Python runner returned no output. stderr: {stderr}"));
+    for line in stdout_reader.lines() {
+        let line = line.map_err(|error| format!("Failed to read Python stdout: {error}"))?;
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        let message = serde_json::from_str::<RunnerMessage>(&line)
+            .map_err(|error| format!("Failed to parse Python runner message: {error}. line: {line}"))?;
+
+        match message {
+            RunnerMessage::Progress(progress) => {
+                app.emit(
+                    "tool-task-progress",
+                    ToolTaskProgressEvent {
+                        request_id: request.request_id.clone(),
+                        task_kind: progress.task_kind,
+                        current: progress.current,
+                        total: progress.total,
+                        percent: progress.percent,
+                        message: progress.message,
+                        current_item: progress.current_item,
+                    },
+                )
+                .map_err(|error| format!("Failed to emit tool progress event: {error}"))?;
+            }
+            RunnerMessage::Result(result) => {
+                final_result = Some(result);
+            }
+        }
     }
 
-    serde_json::from_str::<ResizeTaskResponse>(&stdout)
-        .map_err(|error| format!("Failed to parse Python response: {error}. stderr: {stderr}"))
+    let mut stderr_output = String::new();
+    BufReader::new(stderr)
+        .read_to_string(&mut stderr_output)
+        .map_err(|error| format!("Failed to read Python stderr: {error}"))?;
+
+    let status = child
+        .wait()
+        .map_err(|error| format!("Failed to wait for Python runner: {error}"))?;
+
+    if let Some(result) = final_result {
+        return Ok(result);
+    }
+
+    Err(format!(
+        "Python runner returned no result. status: {status}. stderr: {stderr_output}"
+    ))
 }
 
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![run_resize_task])
+        .invoke_handler(tauri::generate_handler![run_tool_task])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

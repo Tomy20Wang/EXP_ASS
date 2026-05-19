@@ -81,7 +81,125 @@
 - ffmpeg
 - ffprobe
 
-## 3. 桌面端请求链路
+## 3. Video to Frames
+
+### 功能行为
+
+这个功能会把输入视频的每一帧导出为 PNG 图片，并写入你选择的输出文件夹。
+
+当前输出命名规则：
+
+- `frame_00001.png`
+- `frame_00002.png`
+- `frame_00003.png`
+
+也就是使用 `frame_%05d.png` 这样的连续编号格式。
+
+### 实现逻辑
+
+主要文件：
+
+- `apps/desktop/ui/src/features/video/VideoFramesPanel.tsx`
+- `python/labtools_core/tasks/video_to_frames.py`
+- `python/labtools_core/adapters/ffmpeg.py`
+
+执行流程：
+
+1. UI 收集输入视频路径和输出文件夹路径。
+2. Tauri 把请求发送到本地 Python runner。
+3. `labtools_core.dispatch` 把任务分发到 `run_video_to_frames`。
+4. Python 检查输入视频是否存在，并创建输出文件夹。
+5. 输出路径会拼成 `frame_%05d.png` 这样的图片序列模板。
+6. `ffmpeg` 执行逐帧导出，把视频帧写成 PNG 图片。
+7. UI 最终拿到输出文件夹路径和导出命名规则。
+
+### 依赖
+
+- ffmpeg
+
+## 4. Batch Image Resize
+
+### 功能行为
+
+这个功能会读取你选择的输入文件夹，把其中直接包含的图片文件统一缩放后写入输出文件夹。
+
+当前支持：
+
+- `.jpg`
+- `.jpeg`
+- `.png`
+
+当前版本处理的是输入文件夹里直接包含的文件，不会递归处理子文件夹。
+
+### 实现逻辑
+
+主要文件：
+
+- `apps/desktop/ui/src/features/batch/BatchResizePanel.tsx`
+- `python/labtools_core/tasks/batch_tasks.py`
+- `python/labtools_core/tasks/image_resize.py`
+
+执行流程：
+
+1. UI 收集输入文件夹、输出文件夹、目标宽高和是否保持比例。
+2. Python 核心层扫描输入文件夹内直接包含的图片文件。
+3. 对每一张图片，批处理任务都会构造一个单独的 `image_resize` 子任务。
+4. 子任务直接复用现有的 Pillow 缩放逻辑。
+5. 输出文件会按原文件名写入输出文件夹。
+
+## 5. Batch Video Resize
+
+### 功能行为
+
+这个功能会读取输入文件夹中直接包含的 `.mp4` 视频文件，统一缩放后写入输出文件夹。
+
+当前版本同样不会递归处理子文件夹。
+
+### 实现逻辑
+
+主要文件：
+
+- `apps/desktop/ui/src/features/batch/BatchResizePanel.tsx`
+- `python/labtools_core/tasks/batch_tasks.py`
+- `python/labtools_core/tasks/video_resize.py`
+
+执行流程：
+
+1. UI 收集输入文件夹、输出文件夹、目标宽高和是否保持比例。
+2. 批处理任务筛选输入目录中直接包含的 `.mp4` 文件。
+3. 每个视频都会生成一个单独的 `video_resize` 子任务。
+4. 子任务继续沿用现有的 `ffprobe + ffmpeg` 缩放逻辑。
+5. 输出视频会按原文件名写入输出文件夹。
+
+## 6. Batch Video to Frames
+
+### 功能行为
+
+这个功能会读取输入文件夹中直接包含的 `.mp4` 视频，并在输出文件夹下为每个视频建立一个同名子文件夹。
+
+例如：
+
+- 输入视频：`clip_a.mp4`
+- 输出子目录：`clip_a/`
+- 帧文件命名：`frame_00001.png`
+
+### 实现逻辑
+
+主要文件：
+
+- `apps/desktop/ui/src/features/batch/BatchVideoFramesPanel.tsx`
+- `python/labtools_core/tasks/batch_tasks.py`
+- `python/labtools_core/tasks/video_to_frames.py`
+
+执行流程：
+
+1. UI 收集输入文件夹和输出文件夹。
+2. Python 核心层筛选输入目录中直接包含的 `.mp4` 文件。
+3. 对每个视频，批处理任务都会构造一个 `video_to_frames` 子任务。
+4. 每个子任务的输出目录会被设置成 `输出根目录 / 视频文件名（去掉 .mp4）`。
+5. 原有逐帧导出逻辑继续把图片按 `frame_%05d.png` 写入对应子目录。
+
+## 7. 桌面端请求链路
 
 当前桌面端一次请求的完整链路是：
 

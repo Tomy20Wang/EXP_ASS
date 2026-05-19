@@ -2,7 +2,7 @@ from pathlib import Path
 
 from labtools_core.adapters.ffmpeg import get_video_dimensions, resolve_ffmpeg_bin, run_ffmpeg
 from labtools_core.models.task_result import TaskResult
-from labtools_core.models.task_spec import ResizeTaskSpec
+from labtools_core.models.task_spec import TaskSpec
 from labtools_core.utils.paths import ensure_parent_dir
 from labtools_core.utils.resize import fit_within_box
 
@@ -12,12 +12,15 @@ def _build_filter(output_width: int, output_height: int) -> str:
     return f"scale={output_width}:{output_height},setsar=1"
 
 
-def run_video_resize(spec: ResizeTaskSpec) -> TaskResult:
+def run_video_resize(spec: TaskSpec) -> TaskResult:
     input_path = Path(spec.input_path).expanduser()
     output_path = Path(spec.output_path).expanduser()
+    is_zh = spec.language == "zh"
 
     if not input_path.exists():
-        raise FileNotFoundError(f"Input video does not exist: {input_path}")
+        raise FileNotFoundError(
+            f"输入视频不存在: {input_path}" if is_zh else f"Input video does not exist: {input_path}"
+        )
 
     ensure_parent_dir(output_path)
 
@@ -49,11 +52,17 @@ def run_video_resize(spec: ResizeTaskSpec) -> TaskResult:
         ]
     )
 
-    mode_label = "while preserving aspect ratio" if spec.keep_aspect else "with forced resize"
+    mode_label = (
+        "并保持原始比例" if spec.keep_aspect else "并执行强制缩放"
+    ) if is_zh else ("while preserving aspect ratio" if spec.keep_aspect else "with forced resize")
 
     return TaskResult(
         success=True,
-        message=f"Resized video to {output_width}x{output_height} {mode_label}.",
+        message=(
+            f"视频已输出为 {output_width}x{output_height}，{mode_label}。"
+            if is_zh
+            else f"Resized video to {output_width}x{output_height} {mode_label}."
+        ),
         output_path=str(output_path),
         metadata={
             "requestedWidth": spec.width,

@@ -1,45 +1,54 @@
 import { useMemo, useState } from "react";
-import { open, save } from "@tauri-apps/plugin-dialog";
-import { runDesktopTask } from "../../services/desktopApi";
-import type { DesktopTaskResponse, ResizeTaskKind } from "../../types/tasks";
+import { open } from "@tauri-apps/plugin-dialog";
 import { getAppText, type Language } from "../../i18n";
+import { listenToTaskProgress, runDesktopTask } from "../../services/desktopApi";
+import { TaskProgressPanel } from "../shared/TaskProgressPanel";
+import type {
+  BatchResizeTaskKind,
+  DesktopTaskProgressEvent,
+  DesktopTaskResponse,
+} from "../../types/tasks";
 
-interface ResizePanelProps {
+interface BatchResizePanelProps {
   language: Language;
-  taskKind: ResizeTaskKind;
+  taskKind: BatchResizeTaskKind;
   title: string;
   description: string;
   acceptedExtensions: string[];
   outputHint: string;
+  submitLabel: string;
+  runningLabel: string;
 }
 
-function buildOutputSuggestion(inputPath: string, taskKind: ResizeTaskKind) {
+function buildFolderSuggestion(inputPath: string, suffix: string) {
   if (!inputPath) {
     return "";
   }
 
-  const ext = taskKind === "video_resize" ? ".mp4" : "";
-  const replaced = inputPath.replace(/(\.[^./\\]+)?$/, "_resized$1");
-  return taskKind === "video_resize" && !/\.[^./\\]+$/.test(replaced)
-    ? `${replaced}${ext}`
-    : replaced;
+  return `${inputPath}${suffix}`;
 }
 
-export function ResizePanel({
+export function BatchResizePanel({
   language,
   taskKind,
   title,
   description,
   acceptedExtensions,
-  outputHint
-}: ResizePanelProps) {
+  outputHint,
+  submitLabel,
+  runningLabel,
+}: BatchResizePanelProps) {
   const text = getAppText(language);
+  const resizeText = text.forms.resize;
+  const batchText = text.forms.batch;
+  const outputLabel = text.forms.output;
   const [inputPath, setInputPath] = useState("");
   const [outputPath, setOutputPath] = useState("");
   const [width, setWidth] = useState(1280);
   const [height, setHeight] = useState(720);
   const [keepAspect, setKeepAspect] = useState(false);
   const [status, setStatus] = useState<DesktopTaskResponse | null>(null);
+  const [progress, setProgress] = useState<DesktopTaskProgressEvent | null>(null);
   const [isRunning, setIsRunning] = useState(false);
 
   const fileLabel = useMemo(
@@ -47,30 +56,25 @@ export function ResizePanel({
     [acceptedExtensions]
   );
   const targetLabel = `${width}x${height}`;
-  const resizeText = text.forms.resize;
-  const outputLabel = text.forms.output;
+  const suggestionSuffix = taskKind === "batch_image_resize" ? "_images_resized" : "_videos_resized";
 
   async function handleBrowseInput() {
     const selected = await open({
       multiple: false,
-      directory: false,
-      filters: [
-        {
-          name: taskKind === "image_resize" ? (language === "zh" ? "图片" : "Images") : language === "zh" ? "视频" : "Videos",
-          extensions: acceptedExtensions
-        }
-      ]
+      directory: true,
     });
 
     if (typeof selected === "string") {
       setInputPath(selected);
-      setOutputPath((current) => current || buildOutputSuggestion(selected, taskKind));
+      setOutputPath((current) => current || buildFolderSuggestion(selected, suggestionSuffix));
     }
   }
 
   async function handleBrowseOutput() {
-    const selected = await save({
-      defaultPath: outputPath || buildOutputSuggestion(inputPath, taskKind)
+    const selected = await open({
+      multiple: false,
+      directory: true,
+      defaultPath: outputPath || buildFolderSuggestion(inputPath, suggestionSuffix),
     });
 
     if (typeof selected === "string") {
@@ -85,9 +89,9 @@ export function ResizePanel({
     if (!inputPath.trim() || !outputPath.trim()) {
       setStatus({
         success: false,
-        message: resizeText.missingPaths,
+        message: batchText.missingPaths,
         outputPath: "",
-        metadata: {}
+        metadata: {},
       });
       return;
     }
@@ -97,32 +101,58 @@ export function ResizePanel({
         success: false,
         message: resizeText.invalidSize,
         outputPath: "",
-        metadata: {}
+        metadata: {},
       });
       return;
     }
 
     setIsRunning(true);
+    setProgress(null);
+
+    const requestId =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${taskKind}-${Date.now()}`;
+
+    const unlisten = await listenToTaskProgress((payload) => {
+      if (payload.requestId === requestId) {
+        setProgress(payload);
+      }
+    });
 
     try {
       const response = await runDesktopTask({
+        requestId,
         taskKind,
         inputPath,
         outputPath,
         width,
         height,
         keepAspect,
-        language
+        language,
       });
       setStatus(response);
+      const processedCount = Number(response.metadata.processedCount ?? 0);
+      if (processedCount > 0) {
+        setProgress({
+          requestId,
+          taskKind,
+          current: processedCount,
+          total: processedCount,
+          percent: 100,
+          message: response.message,
+          currentItem: null,
+        });
+      }
     } catch (error) {
       setStatus({
         success: false,
         message: error instanceof Error ? error.message : String(error),
         outputPath: "",
-        metadata: {}
+        metadata: {},
       });
     } finally {
+      unlisten();
       setIsRunning(false);
     }
   }
@@ -136,48 +166,42 @@ export function ResizePanel({
 
       <div className="field-group">
         <div className="field">
-          <label htmlFor={`${taskKind}-input`}>{resizeText.inputPath}</label>
+          <label htmlFor={`${taskKind}-input`}>{batchText.inputFolder}</label>
           <div className="path-picker">
             <input
               id={`${taskKind}-input`}
               type="text"
               value={inputPath}
               onChange={(event) => setInputPath(event.target.value)}
-              placeholder={resizeText.selectLocalFile}
+              placeholder={batchText.selectInputFolder}
             />
-            <button
-              className="secondary-button"
-              type="button"
-              onClick={handleBrowseInput}
-            >
+            <button className="secondary-button" type="button" onClick={handleBrowseInput}>
               {text.forms.browse}
             </button>
           </div>
           <p className="hint">
-            {resizeText.acceptedTypes}: {fileLabel}
+            {batchText.acceptedTypes}: {fileLabel}
           </p>
         </div>
 
         <div className="field">
-          <label htmlFor={`${taskKind}-output`}>{resizeText.outputPath}</label>
+          <label htmlFor={`${taskKind}-output`}>{batchText.outputFolder}</label>
           <div className="path-picker">
             <input
               id={`${taskKind}-output`}
               type="text"
               value={outputPath}
               onChange={(event) => setOutputPath(event.target.value)}
-              placeholder={outputHint}
+              placeholder={batchText.selectOutputFolder}
             />
-            <button
-              className="secondary-button"
-              type="button"
-              onClick={handleBrowseOutput}
-            >
+            <button className="secondary-button" type="button" onClick={handleBrowseOutput}>
               {text.forms.browse}
             </button>
           </div>
           <p className="hint">{outputHint}</p>
         </div>
+
+        <p className="hint">{batchText.directChildrenHint}</p>
 
         <div className="field-row">
           <div className="field">
@@ -220,8 +244,16 @@ export function ResizePanel({
       </div>
 
       <button className="primary-button" type="submit" disabled={isRunning}>
-        {isRunning ? resizeText.running : resizeText.run}
+        {isRunning ? runningLabel : submitLabel}
       </button>
+
+      {progress ? (
+        <TaskProgressPanel
+          label={batchText.progress}
+          currentItemLabel={batchText.currentItem}
+          progress={progress}
+        />
+      ) : null}
 
       {status ? (
         <p
